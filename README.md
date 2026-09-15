@@ -36,3 +36,4 @@ Variables d'environnement à ajouter dans Vercel :
 
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL` optionnel, par défaut `gpt-5-nano`
+- `OPENAI_VISION_MODEL` optionnel, par défaut `gpt-4o-mini` pour transcrire le texte visible dans les images

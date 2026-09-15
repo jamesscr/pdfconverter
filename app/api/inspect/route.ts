@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import type { ResponseInputContent } from "openai/resources/responses/responses";
+import type { ResponseCreateParamsNonStreaming } from "openai/resources/responses/responses";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -8,10 +9,12 @@ export const maxDuration = 120;
 const maxPdfSize = 12 * 1024 * 1024;
 const inspectionTimeoutMs = 110_000;
 const defaultModel = "gpt-5-nano";
+const defaultVisionModel = "gpt-4o-mini";
 
 const prompt =
   "Transforme ce PDF en eText accessible, en gardant l'ordre logique de lecture et en supprimant les images. " +
   "Inspecte aussi les images, captures, dessins, tableaux visuels et encadrés. " +
+  "Priorité absolue: transcris le texte visible dans les images jointes, même si ce texte n'apparait pas dans le texte extrait automatiquement. " +
   "Si une image contient une explication pédagogique, un titre, un tableau, une consigne, des étiquettes ou du texte manuscrit, transcris tout ce contenu dans l'eText au bon endroit. " +
   "Ne décris pas les dessins décoratifs, mais ne perds jamais le texte inclus dans une image. " +
   "Pour une image explicative avec tableau, reconstruis le tableau en texte linéaire clair. " +
@@ -25,8 +28,8 @@ const prompt =
   "N'ajoute aucun commentaire, aucune explication et aucune mise en forme Markdown.";
 
 const localTextPrompt =
-  "Voici le texte déjà extrait automatiquement du PDF. Utilise-le comme base principale pour accélérer le travail. " +
-  "Inspecte le PDF seulement pour corriger l'ordre logique, compléter le texte présent dans les images, et retirer les éléments visuels décoratifs.";
+  "Voici le texte déjà extrait automatiquement du PDF. Utilise-le comme base, mais il est incomplet: il peut manquer le texte présent dans les images. " +
+  "Ajoute obligatoirement les textes visibles dans les images jointes au bon endroit dans l'eText.";
 
 export async function POST(request: Request) {
   try {
@@ -93,23 +96,32 @@ export async function POST(request: Request) {
         : [])
     ];
 
+    const model =
+      pageImages.length > 0
+        ? process.env.OPENAI_VISION_MODEL ?? defaultVisionModel
+        : process.env.OPENAI_MODEL ?? defaultModel;
+    const requestBody: ResponseCreateParamsNonStreaming = {
+      model,
+      input: [
+        {
+          role: "user",
+          content
+        }
+      ]
+    };
+
+    if (model.startsWith("gpt-5")) {
+      requestBody.reasoning = {
+        effort: "minimal"
+      };
+      requestBody.text = {
+        verbosity: "low"
+      };
+    }
+
     const response = await client.responses
       .create(
-        {
-          model: process.env.OPENAI_MODEL ?? defaultModel,
-          reasoning: {
-            effort: "minimal"
-          },
-          text: {
-            verbosity: "low"
-          },
-          input: [
-            {
-              role: "user",
-              content
-            }
-          ]
-        },
+        requestBody,
         {
           signal: abortController.signal
         }
