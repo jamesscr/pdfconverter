@@ -59,8 +59,10 @@ export async function POST(request: Request) {
     const client = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY
     });
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const base64 = buffer.toString("base64");
+    const shouldAttachPdf = pageImages.length === 0;
+    const base64 = shouldAttachPdf
+      ? Buffer.from(await file.arrayBuffer()).toString("base64")
+      : "";
 
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), inspectionTimeoutMs);
@@ -80,11 +82,15 @@ export async function POST(request: Request) {
           detail: "high"
         })
       ),
-      {
-        type: "input_file",
-        filename: file.name,
-        file_data: `data:application/pdf;base64,${base64}`
-      }
+      ...(shouldAttachPdf
+        ? [
+            {
+              type: "input_file" as const,
+              filename: file.name,
+              file_data: `data:application/pdf;base64,${base64}`
+            }
+          ]
+        : [])
     ];
 
     const response = await client.responses

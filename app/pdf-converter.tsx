@@ -197,7 +197,8 @@ export function PdfConverter() {
       const formData = new FormData();
       formData.append("file", selectedFile);
       formData.append("localText", formattedText);
-      formData.append("pageImages", JSON.stringify(await renderPdfPageImages(selectedFile)));
+      const pageImages = await renderPdfPageImages(selectedFile);
+      formData.append("pageImages", JSON.stringify(pageImages));
 
       const response = await fetch("/api/inspect", {
         method: "POST",
@@ -358,11 +359,11 @@ async function renderPdfPageImages(file: File) {
   const data = await file.arrayBuffer();
   const pdf = await pdfjs.getDocument({ data }).promise;
   const images: string[] = [];
-  const maxPages = Math.min(pdf.numPages, 8);
+  const maxPages = Math.min(pdf.numPages, 3);
 
   for (let pageNumber = 1; pageNumber <= maxPages; pageNumber += 1) {
     const page = await pdf.getPage(pageNumber);
-    const viewport = page.getViewport({ scale: 1.45 });
+    const viewport = page.getViewport({ scale: 0.9 });
     const canvas = document.createElement("canvas");
     const context = canvas.getContext("2d");
 
@@ -378,7 +379,7 @@ async function renderPdfPageImages(file: File) {
       viewport
     }).promise;
 
-    images.push(canvas.toDataURL("image/jpeg", 0.82));
+    images.push(canvas.toDataURL("image/jpeg", 0.58));
   }
 
   return images;
