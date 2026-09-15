@@ -6,7 +6,7 @@ export const maxDuration = 60;
 
 const maxPdfSize = 12 * 1024 * 1024;
 const inspectionTimeoutMs = 58_000;
-const defaultModel = "gpt-4.1-mini";
+const defaultModel = "gpt-5-nano";
 
 const prompt =
   "Transforme ce PDF en eText accessible, en gardant l'ordre logique de lecture et en supprimant les images. " +
@@ -62,6 +62,12 @@ export async function POST(request: Request) {
       .create(
         {
           model: process.env.OPENAI_MODEL ?? defaultModel,
+          reasoning: {
+            effort: "minimal"
+          },
+          text: {
+            verbosity: "low"
+          },
           input: [
             {
               role: "user",

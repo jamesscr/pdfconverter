@@ -35,4 +35,4 @@ Le bouton `IA` envoie le PDF à la route serveur `/api/inspect`, qui utilise Ope
 Variables d'environnement à ajouter dans Vercel :
 
 - `OPENAI_API_KEY`
-- `OPENAI_MODEL` optionnel, par défaut `gpt-4.1-mini`
+- `OPENAI_MODEL` optionnel, par défaut `gpt-5-nano`
