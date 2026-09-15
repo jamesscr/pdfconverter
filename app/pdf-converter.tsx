@@ -354,9 +354,23 @@ function buildEText(pagesText: string[]) {
 function normalizeAiText(text: string) {
   return text
     .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map(normalizePronounSpacing)
+    .join("\n")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function normalizePronounSpacing(line: string) {
+  return line
+    .replace(/^J(['’])([A-Za-zÀ-ÿ]{3,})$/u, "J$1$2")
+    .replace(/^(Je)([A-Za-zÀ-ÿ]{3,})$/u, "$1 $2")
+    .replace(/^(Tu)([A-Za-zÀ-ÿ]{3,})$/u, "$1 $2")
+    .replace(/^(Nous)([A-Za-zÀ-ÿ]{3,})$/u, "$1 $2")
+    .replace(/^(Vous)([A-Za-zÀ-ÿ]{3,})$/u, "$1 $2")
+    .replace(/^(Ils\/Elles)([A-Za-zÀ-ÿ]{3,})$/u, "$1 $2")
+    .replace(/^(Il\/Elle)([A-Za-zÀ-ÿ]{3,})$/u, "$1 $2");
 }
 
 function parseInspectionResponse(responseText: string) {
@@ -462,6 +476,9 @@ function extractPositionedText(items: unknown[]) {
   const rows = lines.map((line) => buildCellsFromPositionedRow(line, spaceWidth));
 
   return rowsToColumnBlocks(rows)
+    .join("\n")
+    .split("\n")
+    .map(normalizePronounSpacing)
     .join("\n")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
