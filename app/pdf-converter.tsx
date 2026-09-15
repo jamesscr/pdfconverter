@@ -363,14 +363,47 @@ function normalizeAiText(text: string) {
 }
 
 function normalizePronounSpacing(line: string) {
-  return line
+  return normalizeSplitVerbWords(line
+    .replace(/^Palier(\d+)$/u, "Palier $1")
+    .replace(/^Imparfaitde\b/u, "Imparfait de")
+    .replace(/^(.+?)simplede\b/u, "$1simple de")
+    .replace(/^Je ter$/u, "Jeter")
+    .replace(/^Ils\/lles\b/u, "Ils/Elles")
+    .replace(/^(Que)(j['’])([A-Za-zÀ-ÿ]{3,})$/iu, "$1 $2$3")
+    .replace(/^(Que)(je|tu|nous|vous)(\s+)/iu, "$1 $2$3")
+    .replace(/^(Que)(je|tu|nous|vous)([A-Za-zÀ-ÿ]{3,})$/iu, "$1 $2 $3")
+    .replace(/^(Qu['’])(il\/elle|ils\/elles)(\s+)/iu, "$1$2$3")
+    .replace(/^(J['’](?:ai|avais|aurai|aurais|étais))([A-Za-zÀ-ÿ]{2,}.*)$/u, "$1 $2")
+    .replace(/^(Je)(suis|serai|serais|vais)(\s*[A-Za-zÀ-ÿ].*)$/u, "$1 $2$3")
+    .replace(/^(Tu)(as|avais|auras|aurais|es|étais|seras|serais|vas)(\s*[A-Za-zÀ-ÿ].*)$/u, "$1 $2$3")
+    .replace(/^(Nous)(avons|avions|aurons|aurions|sommes|étions|serons|serions|allons)(\s*[A-Za-zÀ-ÿ].*)$/u, "$1 $2$3")
+    .replace(/^(Vous)(avez|aviez|aurez|auriez|êtes|étiez|serez|seriez|allez)(\s*[A-Za-zÀ-ÿ].*)$/u, "$1 $2$3")
     .replace(/^J(['’])([A-Za-zÀ-ÿ]{3,})$/u, "J$1$2")
     .replace(/^(Je)([A-Za-zÀ-ÿ]{3,})$/u, "$1 $2")
     .replace(/^(Tu)([A-Za-zÀ-ÿ]{3,})$/u, "$1 $2")
     .replace(/^(Nous)([A-Za-zÀ-ÿ]{3,})$/u, "$1 $2")
     .replace(/^(Vous)([A-Za-zÀ-ÿ]{3,})$/u, "$1 $2")
     .replace(/^(Ils\/Elles)([A-Za-zÀ-ÿ]{3,})$/u, "$1 $2")
-    .replace(/^(Il\/Elle)([A-Za-zÀ-ÿ]{3,})$/u, "$1 $2");
+    .replace(/^(Il\/Elle)([A-Za-zÀ-ÿ]{3,})$/u, "$1 $2"));
+}
+
+function normalizeSplitVerbWords(line: string) {
+  const compactVerbFixes: Array<[RegExp, string]> = [
+    [/\bai merai\b/gu, "aimerai"],
+    [/\bemplo yerais\b/gu, "emploierais"],
+    [/\bauravu\b/gu, "aura vu"],
+    [/\bJ’aurai s(?=(aimé|appelé|commencé|mangé|employé|acheté|cédé)\b)/gu, "J’aurais "],
+    [/\bsaimé\b/gu, "aimé"],
+    [/\bsappelé\b/gu, "appelé"],
+    [/\bscommencé\b/gu, "commencé"],
+    [/\bsacheté\b/gu, "acheté"],
+    [/\bscédé\b/gu, "cédé"]
+  ];
+
+  return compactVerbFixes.reduce(
+    (currentLine, [pattern, replacement]) => currentLine.replace(pattern, replacement),
+    line
+  );
 }
 
 function parseInspectionResponse(responseText: string) {
