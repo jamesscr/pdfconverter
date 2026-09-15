@@ -4,6 +4,9 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+const maxPdfSize = 12 * 1024 * 1024;
+const inspectionTimeoutMs = 52_000;
+
 const prompt =
   "Transforme ce PDF en eText accessible, en gardant l'ordre logique de lecture et en supprimant les images. " +
   "Inspecte aussi les images, captures, dessins, tableaux visuels et encadrés. " +
@@ -35,36 +38,66 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Fichier PDF invalide." }, { status: 400 });
     }
 
+    if (file.size > maxPdfSize) {
+      return NextResponse.json(
+        {
+          error:
+            "Ce PDF est trop lourd pour l'inspection IA sur Vercel. Essayez avec un PDF plus petit ou moins de pages."
+        },
+        { status: 413 }
+      );
+    }
+
     const client = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY
     });
     const buffer = Buffer.from(await file.arrayBuffer());
     const base64 = buffer.toString("base64");
 
-    const response = await client.responses.create({
-      model: process.env.OPENAI_MODEL ?? "gpt-5",
-      input: [
+    const abortController = new AbortController();
+    const timeout = setTimeout(() => abortController.abort(), inspectionTimeoutMs);
+
+    const response = await client.responses
+      .create(
         {
-          role: "user",
-          content: [
+          model: process.env.OPENAI_MODEL ?? "gpt-5",
+          input: [
             {
-              type: "input_text",
-              text: prompt
-            },
-            {
-              type: "input_file",
-              filename: file.name,
-              file_data: `data:application/pdf;base64,${base64}`
+              role: "user",
+              content: [
+                {
+                  type: "input_text",
+                  text: prompt
+                },
+                {
+                  type: "input_file",
+                  filename: file.name,
+                  file_data: `data:application/pdf;base64,${base64}`
+                }
+              ]
             }
           ]
+        },
+        {
+          signal: abortController.signal
         }
-      ]
-    });
+      )
+      .finally(() => clearTimeout(timeout));
 
     return NextResponse.json({
       text: response.output_text.trim()
     });
   } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      return NextResponse.json(
+        {
+          error:
+            "L'inspection IA prend trop de temps pour ce PDF. Essayez un fichier plus court ou découpez le PDF en quelques pages."
+        },
+        { status: 504 }
+      );
+    }
+
     return NextResponse.json(
       {
         error:
