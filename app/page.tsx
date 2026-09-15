@@ -14,7 +14,8 @@ export default function Home() {
           <h1 id="page-title">PDF vers eText</h1>
           <p>
             Importez un PDF et obtenez un texte électronique propre, lisible,
-            copiable et téléchargeable. Les images du PDF sont ignorées.
+            copiable et téléchargeable. Le mode IA peut aussi transcrire le texte
+            présent dans les images.
           </p>
         </div>
         <PdfConverter />
