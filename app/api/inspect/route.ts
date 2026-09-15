@@ -5,7 +5,8 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const maxPdfSize = 12 * 1024 * 1024;
-const inspectionTimeoutMs = 52_000;
+const inspectionTimeoutMs = 58_000;
+const defaultModel = "gpt-4.1-mini";
 
 const prompt =
   "Transforme ce PDF en eText accessible, en gardant l'ordre logique de lecture et en supprimant les images. " +
@@ -60,7 +61,7 @@ export async function POST(request: Request) {
     const response = await client.responses
       .create(
         {
-          model: process.env.OPENAI_MODEL ?? "gpt-5",
+          model: process.env.OPENAI_MODEL ?? defaultModel,
           input: [
             {
               role: "user",
@@ -88,11 +89,14 @@ export async function POST(request: Request) {
       text: response.output_text.trim()
     });
   } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
+    if (
+      error instanceof Error &&
+      (error.name === "AbortError" || error.message === "Request was aborted.")
+    ) {
       return NextResponse.json(
         {
           error:
-            "L'inspection IA prend trop de temps pour ce PDF. Essayez un fichier plus court ou découpez le PDF en quelques pages."
+            "L'inspection IA prend trop de temps pour ce PDF. Essayez avec le modèle rapide ou découpez le PDF en quelques pages."
         },
         { status: 504 }
       );
