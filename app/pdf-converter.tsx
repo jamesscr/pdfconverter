@@ -197,6 +197,7 @@ export function PdfConverter() {
       const formData = new FormData();
       formData.append("file", selectedFile);
       formData.append("localText", formattedText);
+      formData.append("pageImages", JSON.stringify(await renderPdfPageImages(selectedFile)));
 
       const response = await fetch("/api/inspect", {
         method: "POST",
@@ -345,6 +346,42 @@ function parseInspectionResponse(responseText: string) {
         "Le serveur a renvoyé une réponse invalide pendant l'inspection IA."
     };
   }
+}
+
+async function renderPdfPageImages(file: File) {
+  const pdfjs = await import("pdfjs-dist");
+  pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+    "pdfjs-dist/build/pdf.worker.min.mjs",
+    import.meta.url
+  ).toString();
+
+  const data = await file.arrayBuffer();
+  const pdf = await pdfjs.getDocument({ data }).promise;
+  const images: string[] = [];
+  const maxPages = Math.min(pdf.numPages, 8);
+
+  for (let pageNumber = 1; pageNumber <= maxPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: 1.45 });
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      continue;
+    }
+
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
+
+    await page.render({
+      canvasContext: context,
+      viewport
+    }).promise;
+
+    images.push(canvas.toDataURL("image/jpeg", 0.82));
+  }
+
+  return images;
 }
 
 function extractPositionedText(items: unknown[]) {

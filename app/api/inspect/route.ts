@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
+import type { ResponseInputContent } from "openai/resources/responses/responses";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -39,6 +40,7 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const file = formData.get("file");
     const localText = formData.get("localText");
+    const pageImages = parsePageImages(formData.get("pageImages"));
 
     if (!(file instanceof File) || file.type !== "application/pdf") {
       return NextResponse.json({ error: "Fichier PDF invalide." }, { status: 400 });
@@ -63,6 +65,28 @@ export async function POST(request: Request) {
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), inspectionTimeoutMs);
 
+    const content: ResponseInputContent[] = [
+      {
+        type: "input_text",
+        text:
+          typeof localText === "string" && localText.trim()
+            ? `${prompt}\n\n${localTextPrompt}\n\n${localText.slice(0, 80_000)}`
+            : prompt
+      },
+      ...pageImages.map(
+        (imageUrl): ResponseInputContent => ({
+          type: "input_image",
+          image_url: imageUrl,
+          detail: "high"
+        })
+      ),
+      {
+        type: "input_file",
+        filename: file.name,
+        file_data: `data:application/pdf;base64,${base64}`
+      }
+    ];
+
     const response = await client.responses
       .create(
         {
@@ -76,20 +100,7 @@ export async function POST(request: Request) {
           input: [
             {
               role: "user",
-              content: [
-                {
-                  type: "input_text",
-                  text:
-                    typeof localText === "string" && localText.trim()
-                      ? `${prompt}\n\n${localTextPrompt}\n\n${localText.slice(0, 80_000)}`
-                      : prompt
-                },
-                {
-                  type: "input_file",
-                  filename: file.name,
-                  file_data: `data:application/pdf;base64,${base64}`
-                }
-              ]
+              content
             }
           ]
         },
@@ -125,5 +136,26 @@ export async function POST(request: Request) {
       },
       { status: 500 }
     );
+  }
+}
+
+function parsePageImages(value: FormDataEntryValue | null) {
+  if (typeof value !== "string") {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .filter((item): item is string => typeof item === "string")
+      .filter((item) => item.startsWith("data:image/jpeg;base64,"))
+      .slice(0, 8);
+  } catch {
+    return [];
   }
 }
