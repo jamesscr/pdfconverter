@@ -2,10 +2,10 @@ import OpenAI from "openai";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 const maxPdfSize = 12 * 1024 * 1024;
-const inspectionTimeoutMs = 58_000;
+const inspectionTimeoutMs = 110_000;
 const defaultModel = "gpt-5-nano";
 
 const prompt =
@@ -23,6 +23,10 @@ const prompt =
   "N'invente pas de résumé et ne change pas les mots du document sauf pour rendre l'ordre de lecture clair. " +
   "N'ajoute aucun commentaire, aucune explication et aucune mise en forme Markdown.";
 
+const localTextPrompt =
+  "Voici le texte déjà extrait automatiquement du PDF. Utilise-le comme base principale pour accélérer le travail. " +
+  "Inspecte le PDF seulement pour corriger l'ordre logique, compléter le texte présent dans les images, et retirer les éléments visuels décoratifs.";
+
 export async function POST(request: Request) {
   try {
     if (!process.env.OPENAI_API_KEY) {
@@ -34,6 +38,7 @@ export async function POST(request: Request) {
 
     const formData = await request.formData();
     const file = formData.get("file");
+    const localText = formData.get("localText");
 
     if (!(file instanceof File) || file.type !== "application/pdf") {
       return NextResponse.json({ error: "Fichier PDF invalide." }, { status: 400 });
@@ -74,7 +79,10 @@ export async function POST(request: Request) {
               content: [
                 {
                   type: "input_text",
-                  text: prompt
+                  text:
+                    typeof localText === "string" && localText.trim()
+                      ? `${prompt}\n\n${localTextPrompt}\n\n${localText.slice(0, 80_000)}`
+                      : prompt
                 },
                 {
                   type: "input_file",
@@ -102,7 +110,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            "L'inspection IA prend trop de temps pour ce PDF. Essayez avec le modèle rapide ou découpez le PDF en quelques pages."
+            "L'inspection IA prend trop de temps pour ce PDF. Essayez de traiter moins de pages ou utilisez d'abord l'export local."
         },
         { status: 504 }
       );

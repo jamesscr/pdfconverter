@@ -196,6 +196,7 @@ export function PdfConverter() {
     try {
       const formData = new FormData();
       formData.append("file", selectedFile);
+      formData.append("localText", formattedText);
 
       const response = await fetch("/api/inspect", {
         method: "POST",
