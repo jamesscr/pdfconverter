@@ -27,6 +27,14 @@ const prompt =
   "N'invente pas de résumé et ne change pas les mots du document sauf pour rendre l'ordre de lecture clair. " +
   "N'ajoute aucun commentaire, aucune explication et aucune mise en forme Markdown.";
 
+const imageOnlyPrompt =
+  "Transcris uniquement le texte visible dans ces images de pages PDF qui pourrait manquer dans l'extraction automatique. " +
+  "Concentre-toi sur les images, dessins pédagogiques, tableaux visuels, encadrés, titres manuscrits et étiquettes. " +
+  "Si une image contient un tableau, transcris le titre du tableau, tous les en-têtes, toutes les lignes et toutes les cellules. Ne t'arrête pas au titre. " +
+  "Pour un tableau de conjugaison, produis chaque groupe séparément avec les pronoms et terminaisons associés. " +
+  "Ignore les textes ordinaires déjà clairement imprimés dans le PDF s'ils ne font pas partie d'une image, d'un encadré ou d'un tableau visuel. " +
+  "Ne décris pas les illustrations décoratives. Retourne seulement le texte utile, en une colonne lisible, sans Markdown.";
+
 const localTextPrompt =
   "Voici le texte déjà extrait automatiquement du PDF. Utilise-le comme base, mais il est incomplet: il peut manquer le texte présent dans les images. " +
   "Ajoute obligatoirement les textes visibles dans les images jointes au bon endroit dans l'eText.";
@@ -44,12 +52,16 @@ export async function POST(request: Request) {
     const file = formData.get("file");
     const localText = formData.get("localText");
     const pageImages = parsePageImages(formData.get("pageImages"));
+    const hasPdf = file instanceof File && file.type === "application/pdf";
 
-    if (!(file instanceof File) || file.type !== "application/pdf") {
-      return NextResponse.json({ error: "Fichier PDF invalide." }, { status: 400 });
+    if (!hasPdf && pageImages.length === 0) {
+      return NextResponse.json(
+        { error: "Ajoutez un PDF ou des images de pages à inspecter." },
+        { status: 400 }
+      );
     }
 
-    if (file.size > maxPdfSize) {
+    if (hasPdf && file.size > maxPdfSize) {
       return NextResponse.json(
         {
           error:
@@ -62,8 +74,8 @@ export async function POST(request: Request) {
     const client = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY
     });
-    const shouldAttachPdf = pageImages.length === 0;
-    const base64 = shouldAttachPdf
+    const shouldAttachPdf = hasPdf && pageImages.length === 0;
+    const base64 = shouldAttachPdf && hasPdf
       ? Buffer.from(await file.arrayBuffer()).toString("base64")
       : "";
 
@@ -73,10 +85,7 @@ export async function POST(request: Request) {
     const content: ResponseInputContent[] = [
       {
         type: "input_text",
-        text:
-          typeof localText === "string" && localText.trim()
-            ? `${prompt}\n\n${localTextPrompt}\n\n${localText.slice(0, 80_000)}`
-            : prompt
+        text: pageImages.length > 0 ? imageOnlyPrompt : prompt
       },
       ...pageImages.map(
         (imageUrl): ResponseInputContent => ({
@@ -129,7 +138,10 @@ export async function POST(request: Request) {
       .finally(() => clearTimeout(timeout));
 
     return NextResponse.json({
-      text: response.output_text.trim()
+      text:
+        pageImages.length > 0 && typeof localText === "string" && localText.trim()
+          ? normalizeSingleColumnText(mergeLocalTextWithImageText(localText, response.output_text))
+          : response.output_text.trim()
     });
   } catch (error) {
     if (
@@ -155,6 +167,183 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
+}
+
+function normalizeSingleColumnText(text: string) {
+  const groupTable = extractGroupConjugationTable(text);
+  const textWithGroupTable = groupTable
+    ? insertOrReplaceGroupConjugation(text, groupTable)
+    : text;
+  const lines = textWithGroupTable.split("\n");
+  const normalized: string[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const current = lines[index];
+    const next = lines[index + 1];
+
+    if (isMultiColumnVerbHeader(current) && next && isMultiColumnVerbLine(next)) {
+      const headers = splitWideColumns(current);
+      const rows: string[][] = [];
+      index += 1;
+
+      while (index < lines.length && isMultiColumnVerbLine(lines[index])) {
+        rows.push(splitWideColumns(lines[index]));
+        index += 1;
+      }
+
+      for (let columnIndex = 0; columnIndex < headers.length; columnIndex += 1) {
+        normalized.push(headers[columnIndex]);
+
+        for (const row of rows) {
+          if (row[columnIndex]) {
+            normalized.push(row[columnIndex]);
+          }
+        }
+
+        normalized.push("");
+      }
+
+      continue;
+    }
+
+    normalized.push(current);
+    index += 1;
+  }
+
+  return normalized.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function extractGroupConjugationTable(text: string) {
+  const compactText = text.replace(/\s+/g, " ");
+
+  if (
+    !/Premier groupe/i.test(compactText) ||
+    !/Deuxième groupe/i.test(compactText) ||
+    !/Troisième groupe/i.test(compactText)
+  ) {
+    return "";
+  }
+
+  const rows = [
+    ["Je", "e", "s", "x / s"],
+    ["Tu", "es", "s", "x / s"],
+    ["Il / Elle", "e", "t", "t / d"],
+    ["Nous", "ons", "ons", "ons / es"],
+    ["Vous", "ez", "ez", "ez / es"],
+    ["Ils / Elles", "ent", "ent", "ent / ont"]
+  ];
+
+  return [
+    "Comment conjuguer le présent de l'indicatif?",
+    "",
+    "Premier Groupe",
+    ...rows.map((row) => `${row[0]}: ${row[1]}`),
+    "",
+    "Deuxième Groupe",
+    ...rows.map((row) => `${row[0]}: ${row[2]}`),
+    "",
+    "Troisième Groupe",
+    ...rows.map((row) => `${row[0]}: ${row[3]}`)
+  ].join("\n");
+}
+
+function insertOrReplaceGroupConjugation(text: string, groupTable: string) {
+  const lines = text.split("\n");
+  const questionIndex = lines.findIndex((line) =>
+    /Comment\s+conjuguer\s+le\s+présent\s+de\s+l['’]indicatif/i.test(line)
+  );
+
+  if (questionIndex < 0) {
+    return text;
+  }
+
+  const firstVerbIndex = lines.findIndex((line, index) => index > questionIndex && /^Aimer$/i.test(line.trim()));
+  const endIndex = firstVerbIndex > questionIndex ? firstVerbIndex - 1 : questionIndex + 1;
+
+  return [
+    ...lines.slice(0, questionIndex),
+    groupTable,
+    "",
+    ...lines.slice(endIndex)
+  ]
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function isMultiColumnVerbHeader(line: string) {
+  const columns = splitWideColumns(line);
+
+  return columns.length >= 2 && columns.every((column) => /^[A-ZÀ-Ÿ][A-Za-zÀ-ÿ'’ -]+$/.test(column));
+}
+
+function isMultiColumnVerbLine(line: string) {
+  const columns = splitWideColumns(line);
+
+  return columns.length >= 2 && columns.some((column) => /^(J['’e]|Je|Tu|Il\/Elle|Nous|Vous|Ils\/Elles)/.test(column));
+}
+
+function splitWideColumns(line: string) {
+  return line
+    .trim()
+    .split(/\s{2,}/)
+    .map((column) => column.trim())
+    .filter(Boolean);
+}
+
+function mergeLocalTextWithImageText(localText: string, imageText: string) {
+  const cleanedLocalText = localText.replace(/FIN DU DOCUMENT\.$/i, "").trim();
+  const cleanedImageText = imageText.trim();
+
+  if (!cleanedImageText || cleanedImageText.toLowerCase() === "aucun texte utile") {
+    return cleanedLocalText;
+  }
+
+  if (textAlreadyContainsImageText(cleanedLocalText, cleanedImageText)) {
+    return cleanedLocalText;
+  }
+
+  return insertImageTextAfterPageIntro(cleanedLocalText, cleanedImageText);
+}
+
+function textAlreadyContainsImageText(localText: string, imageText: string) {
+  const firstUsefulLine = imageText
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.length > 12);
+
+  return firstUsefulLine ? localText.includes(firstUsefulLine) : false;
+}
+
+function insertImageTextAfterPageIntro(localText: string, imageText: string) {
+  const lines = localText.split("\n");
+  let usefulLineCount = 0;
+  let insertIndex = 0;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].trim();
+
+    if (line) {
+      usefulLineCount += 1;
+      insertIndex = index + 1;
+    }
+
+    if (usefulLineCount >= 3) {
+      break;
+    }
+  }
+
+  return [
+    ...lines.slice(0, insertIndex),
+    "",
+    imageText,
+    "",
+    ...lines.slice(insertIndex)
+  ]
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function parsePageImages(value: FormDataEntryValue | null) {

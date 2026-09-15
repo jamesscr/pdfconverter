@@ -30,6 +30,7 @@ export function PdfConverter() {
   const [result, setResult] = useState<ConversionResult | null>(null);
   const [error, setError] = useState("");
   const [inspectionStatus, setInspectionStatus] = useState<InspectionStatus>("idle");
+  const [inspectionProgress, setInspectionProgress] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -191,28 +192,48 @@ export function PdfConverter() {
     }
 
     setInspectionStatus("inspecting");
+    setInspectionProgress("");
     setError("");
 
     try {
-      const formData = new FormData();
-      formData.append("file", selectedFile);
-      formData.append("localText", formattedText);
-      const pageImages = await renderPdfPageImages(selectedFile);
-      formData.append("pageImages", JSON.stringify(pageImages));
+      if (!result) {
+        throw new Error("Attendez la conversion locale avant de lancer l'inspection IA.");
+      }
 
-      const response = await fetch("/api/inspect", {
-        method: "POST",
-        body: formData
-      });
-      const payload = parseInspectionResponse(await response.text());
+      const pageBatches = await renderPdfPageImageBatches(selectedFile, 2);
+      const inspectedPages: string[] = [];
 
-      if (!response.ok || !payload.text) {
-        throw new Error(payload.error ?? "Inspection IA impossible.");
+      for (let index = 0; index < pageBatches.length; index += 1) {
+        const batch = pageBatches[index];
+        const localText = buildEText(result.pagesText.slice(batch.startPage - 1, batch.endPage));
+        const formData = new FormData();
+        formData.append("localText", localText);
+        formData.append("pageImages", JSON.stringify(batch.images));
+        formData.append("startPage", String(batch.startPage));
+        formData.append("endPage", String(batch.endPage));
+
+        setInspectionProgress(
+          `Inspection IA pages ${batch.startPage}-${batch.endPage} (${index + 1}/${pageBatches.length})`
+        );
+
+        const response = await fetch("/api/inspect", {
+          method: "POST",
+          body: formData
+        });
+        const payload = parseInspectionResponse(await response.text());
+
+        if (!response.ok || !payload.text) {
+          throw new Error(payload.error ?? "Inspection IA impossible.");
+        }
+
+        inspectedPages.push(
+          normalizeAiText(payload.text).replace(/FIN DU DOCUMENT\.$/i, "").trim()
+        );
       }
 
       setResult({
-        pagesText: [normalizeAiText(payload.text).replace(/FIN DU DOCUMENT\.$/i, "").trim()],
-        pages: 1,
+        pagesText: [inspectedPages.join("\n\n")],
+        pages: result.pages,
         fileName: selectedFile.name
       });
       setStatus("done");
@@ -225,6 +246,7 @@ export function PdfConverter() {
       );
     } finally {
       setInspectionStatus("idle");
+      setInspectionProgress("");
     }
   }
 
@@ -290,8 +312,8 @@ export function PdfConverter() {
         {status === "reading" && <p className="empty">Conversion en cours...</p>}
         {inspectionStatus === "inspecting" && (
           <p className="empty">
-            Inspection IA en cours. Le PDF est restructuré et le texte dans les
-            images est transcrit si présent.
+            {inspectionProgress ||
+              "Inspection IA en cours. Le PDF est inspecté par lots de pages."}
           </p>
         )}
         {status === "error" && inspectionStatus !== "inspecting" && (
@@ -349,7 +371,13 @@ function parseInspectionResponse(responseText: string) {
   }
 }
 
-async function renderPdfPageImages(file: File) {
+type PageImageBatch = {
+  startPage: number;
+  endPage: number;
+  images: string[];
+};
+
+async function renderPdfPageImageBatches(file: File, batchSize: number) {
   const pdfjs = await import("pdfjs-dist");
   pdfjs.GlobalWorkerOptions.workerSrc = new URL(
     "pdfjs-dist/build/pdf.worker.min.mjs",
@@ -358,31 +386,37 @@ async function renderPdfPageImages(file: File) {
 
   const data = await file.arrayBuffer();
   const pdf = await pdfjs.getDocument({ data }).promise;
-  const images: string[] = [];
-  const maxPages = Math.min(pdf.numPages, 3);
+  const batches: PageImageBatch[] = [];
 
-  for (let pageNumber = 1; pageNumber <= maxPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    const viewport = page.getViewport({ scale: 0.9 });
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d");
+  for (let startPage = 1; startPage <= pdf.numPages; startPage += batchSize) {
+    const endPage = Math.min(startPage + batchSize - 1, pdf.numPages);
+    const images: string[] = [];
 
-    if (!context) {
-      continue;
+    for (let pageNumber = startPage; pageNumber <= endPage; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: 1.35 });
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+
+      if (!context) {
+        continue;
+      }
+
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+
+      await page.render({
+        canvasContext: context,
+        viewport
+      }).promise;
+
+      images.push(canvas.toDataURL("image/jpeg", 0.72));
     }
 
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
-
-    await page.render({
-      canvasContext: context,
-      viewport
-    }).promise;
-
-    images.push(canvas.toDataURL("image/jpeg", 0.58));
+    batches.push({ startPage, endPage, images });
   }
 
-  return images;
+  return batches;
 }
 
 function extractPositionedText(items: unknown[]) {
