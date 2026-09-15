@@ -201,7 +201,7 @@ export function PdfConverter() {
         method: "POST",
         body: formData
       });
-      const payload = (await response.json()) as { text?: string; error?: string };
+      const payload = parseInspectionResponse(await response.text());
 
       if (!response.ok || !payload.text) {
         throw new Error(payload.error ?? "Inspection IA impossible.");
@@ -332,6 +332,18 @@ function normalizeAiText(text: string) {
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function parseInspectionResponse(responseText: string) {
+  try {
+    return JSON.parse(responseText) as { text?: string; error?: string };
+  } catch {
+    return {
+      error:
+        responseText.trim() ||
+        "Le serveur a renvoyé une réponse invalide pendant l'inspection IA."
+    };
+  }
 }
 
 function extractPositionedText(items: unknown[]) {

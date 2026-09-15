@@ -20,47 +20,59 @@ const prompt =
   "N'ajoute aucun commentaire, aucune explication et aucune mise en forme Markdown.";
 
 export async function POST(request: Request) {
-  if (!process.env.OPENAI_API_KEY) {
+  try {
+    if (!process.env.OPENAI_API_KEY) {
+      return NextResponse.json(
+        { error: "OPENAI_API_KEY manque dans les variables d'environnement." },
+        { status: 500 }
+      );
+    }
+
+    const formData = await request.formData();
+    const file = formData.get("file");
+
+    if (!(file instanceof File) || file.type !== "application/pdf") {
+      return NextResponse.json({ error: "Fichier PDF invalide." }, { status: 400 });
+    }
+
+    const client = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY
+    });
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const base64 = buffer.toString("base64");
+
+    const response = await client.responses.create({
+      model: process.env.OPENAI_MODEL ?? "gpt-5",
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: prompt
+            },
+            {
+              type: "input_file",
+              filename: file.name,
+              file_data: `data:application/pdf;base64,${base64}`
+            }
+          ]
+        }
+      ]
+    });
+
+    return NextResponse.json({
+      text: response.output_text.trim()
+    });
+  } catch (error) {
     return NextResponse.json(
-      { error: "OPENAI_API_KEY manque dans les variables d'environnement." },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Erreur inconnue pendant l'inspection IA."
+      },
       { status: 500 }
     );
   }
-
-  const formData = await request.formData();
-  const file = formData.get("file");
-
-  if (!(file instanceof File) || file.type !== "application/pdf") {
-    return NextResponse.json({ error: "Fichier PDF invalide." }, { status: 400 });
-  }
-
-  const client = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY
-  });
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const base64 = buffer.toString("base64");
-
-  const response = await client.responses.create({
-    model: process.env.OPENAI_MODEL ?? "gpt-5",
-    input: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "input_text",
-            text: prompt
-          },
-          {
-            type: "input_file",
-            filename: file.name,
-            file_data: `data:application/pdf;base64,${base64}`
-          }
-        ]
-      }
-    ]
-  });
-
-  return NextResponse.json({
-    text: response.output_text.trim()
-  });
 }
